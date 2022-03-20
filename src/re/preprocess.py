@@ -184,8 +184,9 @@ def create_nyt_train_test(args):
             
     return df_train, df_test
 
-def convert_markers_to_tokens_positions(df):
+def convert_markers_to_tokens_positions(df,rm):
      """
+     Prms: df with sents (text with entity markers as below), relation: 'person-company', rm (maps relation to index)
      Convert 'Hello [__E1__LOC]She[__E1__END]code' -->  {token: ['Hello','She','codes'], subj_start : 1, subj_type:'LOC', ....  } 
      """    
      vectorizer = CountVectorizer(binary = True)
@@ -214,6 +215,7 @@ def convert_markers_to_tokens_positions(df):
                res_tok+=[tok]
           d['token'] = res_tok
           d['relation'] = row.relations
+          d['relation_id'] = rm.rel2idx[d['relation']]
           return d 
                
      df['data'] = df.apply(convert_to_tokens, axis=1)
@@ -236,9 +238,7 @@ def create_nyt_tokens_format(args):
      args.add_entity_markers = partial(internal_add_entity_markers,open_marker_fmt='[__E{ent_no}__{ent_type}]',close_marker_fmt='[__E{ent_no}__END]')
      df_train, df_test = create_nyt_train_test(args)
      
-     df_train = convert_markers_to_tokens_positions(df_train)
      rm = Relations_Mapper(df_train['relations'])
-     df_test = convert_markers_to_tokens_positions(df_test)
-     
-     # TODO: Write 
-     df_test['data'].tolist()
+     df_train = convert_markers_to_tokens_positions(df_train,rm)
+     df_test = convert_markers_to_tokens_positions(df_test,rm)
+     return df_train, def_test
