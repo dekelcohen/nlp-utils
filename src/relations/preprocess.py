@@ -241,4 +241,4 @@ def create_nyt_tokens_format(args):
      rm = Relations_Mapper(df_train['relations'])
      df_train = convert_markers_to_tokens_positions(df_train,rm)
      df_test = convert_markers_to_tokens_positions(df_test,rm)
-     return df_train, df_test
+     return df_train, df_test, rm
