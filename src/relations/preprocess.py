@@ -230,6 +230,7 @@ def create_nyt_tokens_format(args):
      args = D()
      args.train_data = r'../Datasets/New York Times Relation Extraction/train.json'
      args.test_data = r'../Datasets/New York Times Relation Extraction/valid.json'        
+     args.filter_nyt = 1000
      Test:df_test.iloc[0].data 
           for i,tok in enumerate(df_test.iloc[0].data['token']):
                print(i, tok)
