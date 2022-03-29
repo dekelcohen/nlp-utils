@@ -49,13 +49,9 @@ nrm_types = {'ORGANIZATION' : 'ORG',
 
 def internal_add_entity_markers(row, open_marker_fmt, close_marker_fmt):
     dct_em = Counter([ item['text'] for item in row.entityMentions ])
-    dct_types = { item['text'] : nrm_types[item['label']] for item in row.entityMentions }
-    row.em1Text = unidecode(row.em1Text)
-    row.em2Text = unidecode(row.em2Text)
+    dct_types = { item['text'] : nrm_types[item['label']] for item in row.entityMentions }    
     e1_num_occur = dct_em[row.em1Text]
-    e2_num_occur = dct_em[row.em2Text]
-    
-    
+    e2_num_occur = dct_em[row.em2Text]        
     # filter out samples that have both E1 and E2 > 1 occur - for simplicity - there are only few of them
     if e1_num_occur > 1 and e2_num_occur > 1:
         return None
@@ -116,23 +112,30 @@ def internal_add_entity_markers(row, open_marker_fmt, close_marker_fmt):
         replace_anchor()
         replace_other()        
     return sent
-
-def process_nyt_lines(lines, add_entity_markers):
-    # TODO: Multi label: Select a single label or create 2 samples (same vec for 2 labels ...)
-    ### TODO:Debug:Remove 
-    # data_path = r'..\Datasets\New York Times Relation Extraction\train.json'    
+    
+def process_nyt_lines(lines, args):
+    """
+    TODO: Multi label: Select a single label or create 2 samples (same vec for 2 labels ...)
+    data_path = r'../Datasets/New York Times Relation Extraction/rain.json'
+    """
     
     lst_dicts = [json.loads(line) for line in lines]
     df = pd.DataFrame(lst_dicts)
     df = df.explode('relationMentions')
     df = pd.concat([df,df.relationMentions.apply(pd.Series)],axis=1).drop(columns='relationMentions')
     df = df.rename(columns={'sentText' : 'sents','label' : 'relations'})    
+    df['em1Text']= df.em1Text.apply(unidecode)
+    df['em2Text']= df.em2Text.apply(unidecode)
     
-    
-    df['sents'] = df.apply(add_entity_markers, axis=1)
-    df = df[~df.sents.isna()] # filter out samples that have both E1 and E2 > 1 occur - for simplicity - there are only few of them
+    if getattr(args,'out_entities',False):
+        # Do not extract markers - return columns with entity E1 and E2 text instead         
+        df = df[['sents','relations','em1Text','em2Text']]
+    else:
+        df['sents'] = df.apply(args.add_entity_markers, axis=1)
+        df = df[~df.sents.isna()] # filter out samples that have both E1 and E2 > 1 occur - for simplicity - there are only few of them
+        df = df[['sents','relations']]
         
-    df = df[['sents','relations']].drop_duplicates()
+    df = df.drop_duplicates()
     return df
 
 DEFAULT_INC_CLASSES = ['/location/location/contains', '/people/person/place_lived', '/business/person/company']        
@@ -145,7 +148,7 @@ def filter_nyt(df,balance,include_classes = DEFAULT_INC_CLASSES, subsample_n = 0
     df_res = df[df.relations.isin(include_classes)]
     if balance:
         rus = RandomUnderSampler()
-        X_resampled, y_resampled = rus.fit_resample(X=df_res[['sents']], y=df_res[['relations']])
+        X_resampled, y_resampled = rus.fit_resample(X=df_res.drop(columns='relations'), y=df_res[['relations']])
         df_res = pd.concat([X_resampled,y_resampled], axis=1)
         
     if subsample_n > 0:        
@@ -153,6 +156,15 @@ def filter_nyt(df,balance,include_classes = DEFAULT_INC_CLASSES, subsample_n = 0
         
     return df_res
 
+def filter_nyt_train_test(args, df_train, df_test):
+    if args.filter_nyt > 0:
+        df_train = filter_nyt(df_train, balance=True,subsample_n = args.filter_nyt)        
+        
+    if args.filter_nyt > 0:
+        df_test = filter_nyt(df_test, balance=False,subsample_n = False)
+        
+    return df_train, df_test
+        
 def create_nyt_train_test(args):
     """
     class D:
@@ -169,19 +181,16 @@ def create_nyt_train_test(args):
     with open(data_path, 'r', encoding='utf8') as f:
         lines = f.readlines()
     
-    df_train = process_nyt_lines(lines,add_entity_markers = args.add_entity_markers)    
-    if args.filter_nyt > 0:
-        df_train = filter_nyt(df_train, balance=True,subsample_n = args.filter_nyt)        
-        
+    df_train = process_nyt_lines(lines, args)    
+            
     data_path = args.test_data #'./data/New York Times Relation Extraction/valid.json'
     logger.info("Reading test file %s..." % data_path)
     with open(data_path, 'r', encoding='utf8') as f:
         lines = f.readlines()
     
-    df_test = process_nyt_lines(lines,add_entity_markers = args.add_entity_markers)    
-    if args.filter_nyt > 0:
-        df_test = filter_nyt(df_test, balance=False,subsample_n = False)        
-            
+    df_test = process_nyt_lines(lines, args)    
+    
+    df_train, df_test = filter_nyt_train_test(args, df_train, df_test)        
     return df_train, df_test
 
 def convert_markers_to_tokens_positions(df,rm):
@@ -231,10 +240,11 @@ def create_nyt_tokens_format(args):
      args.train_data = r'../Datasets/New York Times Relation Extraction/train.json'
      args.test_data = r'../Datasets/New York Times Relation Extraction/valid.json'        
      args.filter_nyt = 1000
+
      Test:df_test.iloc[0].data 
           for i,tok in enumerate(df_test.iloc[0].data['token']):
                print(i, tok)
-     
+                
      """
      args.add_entity_markers = partial(internal_add_entity_markers,open_marker_fmt='[__E{ent_no}__{ent_type}]',close_marker_fmt='[__E{ent_no}__END]')
      df_train, df_test = create_nyt_train_test(args)
