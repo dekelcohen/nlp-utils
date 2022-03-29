@@ -48,8 +48,7 @@ nrm_types = {'ORGANIZATION' : 'ORG',
              'PER' : 'PER'}
 
 def internal_add_entity_markers(row, open_marker_fmt, close_marker_fmt):
-    dct_em = Counter([ item['text'] for item in row.entityMentions ])
-    dct_types = { item['text'] : nrm_types[item['label']] for item in row.entityMentions }    
+    dct_em = Counter([ item['text'] for item in row.entityMentions ])    
     e1_num_occur = dct_em[row.em1Text]
     e2_num_occur = dct_em[row.em2Text]        
     # filter out samples that have both E1 and E2 > 1 occur - for simplicity - there are only few of them
@@ -61,13 +60,17 @@ def internal_add_entity_markers(row, open_marker_fmt, close_marker_fmt):
     # If one em contains the other (ex: Lake Washington contains Washington) --> it is also the anchor, to prevent find Washington within Lake Washington
     if e1_num_occur > 1 or row.em2Text.find(row.em1Text) != -1:
         anchor = row.em2Text
+        anchor_type = row.em2Type
         anc_no = 2
         other = row.em1Text
+        other_type = row.em1Type
         oth_no = 1
     else:
         anchor = row.em1Text
+        anchor_type = row.em1Type
         anc_no = 1
         other = row.em2Text
+        other_type = row.em2Type
         oth_no = 2
     
         
@@ -95,13 +98,13 @@ def internal_add_entity_markers(row, open_marker_fmt, close_marker_fmt):
     sent = row.sents
     def replace_other():        
         nonlocal sent
-        open_marker = open_marker_fmt.format(ent_no=oth_no,ent_type=dct_types[other])
-        close_marker = close_marker_fmt.format(ent_no=oth_no,ent_type=dct_types[other])
+        open_marker = open_marker_fmt.format(ent_no=oth_no,ent_type=other_type)
+        close_marker = close_marker_fmt.format(ent_no=oth_no,ent_type=other_type)
         sent = sent[:idx_other] + f'{open_marker}{other}{close_marker}' + sent[idx_other+len(other):] 
     def replace_anchor():
         nonlocal sent
-        open_marker = open_marker_fmt.format(ent_no=anc_no,ent_type=dct_types[anchor])
-        close_marker = close_marker_fmt.format(ent_no=anc_no,ent_type=dct_types[anchor])
+        open_marker = open_marker_fmt.format(ent_no=anc_no,ent_type=anchor_type)
+        close_marker = close_marker_fmt.format(ent_no=anc_no,ent_type=anchor_type)
         sent = sent[:idx_anchor] + f'{open_marker}{anchor}{close_marker}' + sent[idx_anchor+len(anchor):] 
         
     # Must first add markers to the right most entity - not to push indexes
@@ -112,6 +115,8 @@ def internal_add_entity_markers(row, open_marker_fmt, close_marker_fmt):
         replace_anchor()
         replace_other()        
     return sent
+
+TYPED_ENTITY_MARKER_FUNC = partial(internal_add_entity_markers,open_marker_fmt='[__E{ent_no}__{ent_type}]',close_marker_fmt='[__E{ent_no}__END]')
     
 def process_nyt_lines(lines, args):
     """
@@ -124,12 +129,17 @@ def process_nyt_lines(lines, args):
     df = df.explode('relationMentions')
     df = pd.concat([df,df.relationMentions.apply(pd.Series)],axis=1).drop(columns='relationMentions')
     df = df.rename(columns={'sentText' : 'sents','label' : 'relations'})    
-    df['em1Text']= df.em1Text.apply(unidecode)
-    df['em2Text']= df.em2Text.apply(unidecode)
+    def get_entities_with_types(row):
+        dct_types = { item['text'] : nrm_types[item['label']] for item in row.entityMentions }
+        uni_em1Text = unidecode(row.em1Text)
+        uni_em2Text = unidecode(row.em2Text)
+        return pd.Series([uni_em1Text,dct_types[uni_em1Text],uni_em2Text,dct_types[uni_em2Text]])
+    df[['em1Text','em1Type','em2Text','em2Type']] = df.apply(get_entities_with_types, axis=1)
+    
     
     if getattr(args,'out_entities',False):
         # Do not extract markers - return columns with entity E1 and E2 text instead         
-        df = df[['sents','relations','em1Text','em2Text']]
+        df = df[['sents','relations','em1Text','em2Text','em1Type','em2Type']]
     else:
         df['sents'] = df.apply(args.add_entity_markers, axis=1)
         df = df[~df.sents.isna()] # filter out samples that have both E1 and E2 > 1 occur - for simplicity - there are only few of them
@@ -140,7 +150,9 @@ def process_nyt_lines(lines, args):
 
 DEFAULT_INC_CLASSES = ['/location/location/contains', '/people/person/place_lived', '/business/person/company']        
 def filter_nyt(df,balance,include_classes = DEFAULT_INC_CLASSES, subsample_n = 0):
-    
+    """
+    Filter and balance few classes out of train and test
+    """
     from imblearn.under_sampling import RandomUnderSampler
     
     
@@ -190,7 +202,7 @@ def create_nyt_train_test(args):
     
     df_test = process_nyt_lines(lines, args)    
     
-    df_train, df_test = filter_nyt_train_test(args, df_train, df_test)        
+    df_train, df_test = filter_nyt_train_test(args, df_train, df_test)
     return df_train, df_test
 
 def convert_markers_to_tokens_positions(df,rm):
@@ -246,7 +258,7 @@ def create_nyt_tokens_format(args):
                print(i, tok)
                 
      """
-     args.add_entity_markers = partial(internal_add_entity_markers,open_marker_fmt='[__E{ent_no}__{ent_type}]',close_marker_fmt='[__E{ent_no}__END]')
+     args.add_entity_markers = TYPED_ENTITY_MARKER_FUNC
      df_train, df_test = create_nyt_train_test(args)
      
      rm = Relations_Mapper(df_train['relations'])
