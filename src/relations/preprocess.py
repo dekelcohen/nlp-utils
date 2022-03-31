@@ -47,10 +47,9 @@ nrm_types = {'ORGANIZATION' : 'ORG',
              'PERSON' : 'PER',
              'PER' : 'PER'}
 
-def internal_add_entity_markers(row, open_marker_fmt, close_marker_fmt):
-    dct_em = Counter([ item['text'] for item in row.entityMentions ])    
-    e1_num_occur = dct_em[row.em1Text]
-    e2_num_occur = dct_em[row.em2Text]        
+def internal_add_entity_markers(row, open_marker_fmt, close_marker_fmt, trans_unicode = True):    
+    e1_num_occur = row.em1Cnt
+    e2_num_occur = row.em2Cnt
     # filter out samples that have both E1 and E2 > 1 occur - for simplicity - there are only few of them
     if e1_num_occur > 1 and e2_num_occur > 1:
         return None
@@ -73,12 +72,13 @@ def internal_add_entity_markers(row, open_marker_fmt, close_marker_fmt):
         other_type = row.em2Type
         oth_no = 2
     
+    if trans_unicode:        
+        row.sents = unidecode(row.sents)
         
-    row.sents = unidecode(row.sents)
     idx_anchor = row.sents.find(anchor)
     # If em text cannot be found - filter sample
     if  idx_anchor == -1:
-        print(anchor + '****' + row.sents)
+        print(str(row.name) + '****' + anchor + '****' + row.sents)
         return None
     idx_anchor = row.sents.index(anchor)
     idx_other_before = row.sents.rfind(other,0,idx_anchor)
@@ -92,7 +92,7 @@ def internal_add_entity_markers(row, open_marker_fmt, close_marker_fmt):
     
     # If em text cannot be found - filter sample
     if  idx_other == -1:
-        print(other + '****' + row.sents)
+        print(str(row.name) + '****' + other + '****' + row.sents)
         return None
     
     sent = row.sents
@@ -133,13 +133,17 @@ def process_nyt_lines(lines, args):
         dct_types = { item['text'] : nrm_types[item['label']] for item in row.entityMentions }
         uni_em1Text = unidecode(row.em1Text)
         uni_em2Text = unidecode(row.em2Text)
-        return pd.Series([uni_em1Text,dct_types[uni_em1Text],uni_em2Text,dct_types[uni_em2Text]])
-    df[['em1Text','em1Type','em2Text','em2Type']] = df.apply(get_entities_with_types, axis=1)
+        dct_em = Counter([ item['text'] for item in row.entityMentions ])    
+        e1_cnt = dct_em[row.em1Text]
+        e2_cnt = dct_em[row.em2Text]        
+        return pd.Series([uni_em1Text,dct_types[uni_em1Text],e1_cnt,uni_em2Text,dct_types[uni_em2Text],e2_cnt])
+    EM_COLS = ['em1Text','em1Type','em1Cnt','em2Text','em2Type','em2Cnt']
+    df[EM_COLS] = df.apply(get_entities_with_types, axis=1)
     
     
     if getattr(args,'out_entities',False):
         # Do not extract markers - return columns with entity E1 and E2 text instead         
-        df = df[['sents','relations','em1Text','em2Text','em1Type','em2Type']]
+        df = df[['sents','relations'] + EM_COLS]
     else:
         df['sents'] = df.apply(args.add_entity_markers, axis=1)
         df = df[~df.sents.isna()] # filter out samples that have both E1 and E2 > 1 occur - for simplicity - there are only few of them
@@ -242,6 +246,12 @@ def convert_markers_to_tokens_positions(df,rm):
      df['data'] = df.apply(convert_to_tokens, axis=1)
      return df
 
+def create_nyt_train_test_tokens_format(df_train, df_test):
+    rm = Relations_Mapper(df_train['relations'])
+    df_train = convert_markers_to_tokens_positions(df_train,rm)
+    df_test = convert_markers_to_tokens_positions(df_test,rm)
+    return df_train, df_test, rm
+
 def create_nyt_tokens_format(args):
      """
      Loads and formats NYT with typed-markers (inline) --> convert it to dict of tokens list + subj_start, obj_startm obj_type .... format   
@@ -259,9 +269,5 @@ def create_nyt_tokens_format(args):
                 
      """
      args.add_entity_markers = TYPED_ENTITY_MARKER_FUNC
-     df_train, df_test = create_nyt_train_test(args)
-     
-     rm = Relations_Mapper(df_train['relations'])
-     df_train = convert_markers_to_tokens_positions(df_train,rm)
-     df_test = convert_markers_to_tokens_positions(df_test,rm)
-     return df_train, df_test, rm
+     df_train, df_test = create_nyt_train_test(args)          
+     return create_nyt_train_test_tokens_format(df_train, df_test)

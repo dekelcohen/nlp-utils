@@ -1,0 +1,10 @@
+unidecode
+imblearn
+pandas
+matplotlib
+wandb
+ujson
+tqdm
+--find-links https://download.pytorch.org/whl/torch_stable.html
+torch==1.10.2+cu113
+transformers
